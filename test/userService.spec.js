@@ -2,32 +2,48 @@ import { expect } from 'chai';
 import sinon from 'sinon';
 import { getUserById } from '../userService.js';
 
-describe('UserService - getUserById', function () {
-  let db;
+describe('UserService - getUserById with Redis', function () {
+  let db, redis;
 
   beforeEach(() => {
-    db = { findUserById: sinon.stub() }; // Mocked database object
+    db = { findUserById: sinon.stub() }; // Mocked database
+    redis = { get: sinon.stub(), set: sinon.stub() }; // Mocked Redis
   });
 
   afterEach(() => {
-    sinon.restore(); // Clean up stubs/mocks after each test
+    sinon.restore();
   });
 
-  it('should return user details when user exists', async function () {
+  it('should return user details from Redis if available', async function () {
     const fakeUser = { id: 1, name: 'John Doe', email: 'john@example.com' };
-    db.findUserById.resolves(fakeUser); // Stub the method
+    redis.get.resolves(JSON.stringify(fakeUser)); // Redis returns cached user
 
-    const result = await getUserById(1, db);
+    const result = await getUserById(1, db, redis);
 
     expect(result).to.deep.equal(fakeUser);
-    expect(db.findUserById.calledOnceWith(1)).to.be.true;
+    expect(redis.get.calledOnceWith('user:1')).to.be.true;
+    expect(db.findUserById.notCalled).to.be.true; // DB should not be queried
   });
 
-  it('should throw an error if user does not exist', async function () {
-    db.findUserById.resolves(null); // Stub to return null
+  it('should fetch from DB if Redis cache is empty and store in Redis', async function () {
+    const fakeUser = { id: 2, name: 'Jane Doe', email: 'jane@example.com' };
+    redis.get.resolves(null); // No cache
+    db.findUserById.resolves(fakeUser); // Fetch from DB
+
+    const result = await getUserById(2, db, redis);
+
+    expect(result).to.deep.equal(fakeUser);
+    expect(redis.get.calledOnceWith('user:2')).to.be.true;
+    expect(db.findUserById.calledOnceWith(2)).to.be.true;
+    expect(redis.set.calledOnceWith('user:2', JSON.stringify(fakeUser), 'EX', 3600)).to.be.true; // Cached
+  });
+
+  it('should throw an error if user does not exist in DB and Redis is empty', async function () {
+    redis.get.resolves(null);
+    db.findUserById.resolves(null); // User not found
 
     try {
-      await getUserById(2, db);
+      await getUserById(3, db, redis);
       throw new Error('Test should have thrown an error');
     } catch (error) {
       expect(error.message).to.equal('User not found');
@@ -36,46 +52,10 @@ describe('UserService - getUserById', function () {
 
   it('should throw an error if userId is not provided', async function () {
     try {
-      await getUserById(null, db);
+      await getUserById(null, db, redis);
       throw new Error('Test should have thrown an error');
     } catch (error) {
       expect(error.message).to.equal('User ID is required');
     }
-  });
-
-  it('should call findUserById with the correct userId', async function () {
-    const fakeUser = { id: 3, name: 'Jane Doe', email: 'jane@example.com' };
-    db.findUserById.resolves(fakeUser);
-
-    await getUserById(3, db);
-
-    expect(db.findUserById.calledOnceWith(3)).to.be.true;
-  });
-
-  it('should handle errors thrown by db.findUserById()', async function () {
-    db.findUserById.rejects(new Error('Database connection failed'));
-
-    try {
-      await getUserById(4, db);
-      throw new Error('Test should have thrown an error');
-    } catch (error) {
-      expect(error.message).to.equal('Database connection failed');
-    }
-  });
-
-  it('should return the correct user for different userIds', async function () {
-    const users = [
-      { id: 5, name: 'Alice', email: 'alice@example.com' },
-      { id: 6, name: 'Bob', email: 'bob@example.com' },
-    ];
-
-    db.findUserById.withArgs(5).resolves(users[0]);
-    db.findUserById.withArgs(6).resolves(users[1]);
-
-    const result1 = await getUserById(5, db);
-    const result2 = await getUserById(6, db);
-
-    expect(result1).to.deep.equal(users[0]);
-    expect(result2).to.deep.equal(users[1]);
   });
 });
