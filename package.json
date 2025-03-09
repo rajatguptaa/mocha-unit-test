@@ -1,0 +1,13 @@
+{
+  "name": "mocha-unit-test",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "mocha 'test/*.spec.js' --recursive"
+  },
+  "devDependencies": {
+    "chai": "^5.2.0",
+    "mocha": "^11.1.0",
+    "sinon": "^19.0.2"
+  }
+}
